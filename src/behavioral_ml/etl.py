@@ -5,7 +5,7 @@ import numpy as np
 import os
 
 
-def load_data(data_dir: str | Path) -> pd.DataFrame:
+def load_data(data_dir: str | Path):
     INDEX_NAMES = [
         "User ID",
         "Is Genuine",
