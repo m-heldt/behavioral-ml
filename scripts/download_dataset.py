@@ -20,6 +20,4 @@ pooch.retrieve(
 
 
 shutil.move(extracted_dir, target_dir)
-for path in data_dir.iterdir():
-    if path.stem != RAW_DATASET_NAME:
-        shutil.rmtree(path)
+shutil.rmtree(data_dir / "Behaviour Biometrics Dataset")
