@@ -6,6 +6,13 @@ import os
 
 
 def load_data(data_dir: str | Path) -> pd.DataFrame:
+    INDEX_NAMES = [
+        "User ID",
+        "Is Genuine",
+        "Test ID",
+        "Event ID",
+    ]
+    
     data_dir = Path(data_dir)
 
     if not data_dir.exists():
@@ -13,7 +20,7 @@ def load_data(data_dir: str | Path) -> pd.DataFrame:
     if not data_dir.is_dir():
         raise NotADirectoryError(data_dir)
 
-    file_list = os.listdir(data_dir)
+    file_list = [file.name for file in data_dir.glob("*.json")]
     file_list.sort()
     
     mouse_data, key_data = {}, {}
@@ -43,29 +50,24 @@ def load_data(data_dir: str | Path) -> pd.DataFrame:
         "Epoch": "Float64",
         "Movement ID": "UInt16"
     })
-    mouse_df.index.names = [
-        "User ID",
-        "Is Genuine",
-        "Test ID",
-        "Event ID",
-    ]
+    mouse_df.index.names = INDEX_NAMES
     mouse_df.set_index(["Movement ID"], append=True, inplace=True)
+
     mouse_df.drop(["false_enters", "Timestamp"], axis=1, inplace=True)
-    
     mouse_df.dropna(subset="Event", inplace=True)
+
+    # drop events with duplicated Epoch within each Event type group
+    # this prevents inf velocity values while preserving data of other Event types
     mouse_df.drop_duplicates(subset=["Event", "Epoch"], inplace=True)
   
 
     key_df = pd.DataFrame.from_dict(key_data, orient="index").astype({
         "Epoch": "Float64"
     })
-    key_df.index.names = [
-            "User ID",
-            "Is Genuine",
-            "Test ID",
-            "Event ID"
-        ]
+    key_df.index.names = INDEX_NAMES
+    
+    # "Text Changed" and "Input Box" columns may provide useful data
+    # consider extracting features out of them in the future
     key_df.drop(["Text Changed", "Timestamp", "Input Box"], axis=1, inplace=True)
-    # key_df.set_index(["Key"], append=True, inplace=True)
 
     return (mouse_df, key_df)
