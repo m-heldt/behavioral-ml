@@ -4,9 +4,29 @@ import pandas as pd
 TEST_LEVEL = ["User ID", "Is Genuine", "Test ID"]
 MOVEMENT_LEVEL = TEST_LEVEL + ["Movement ID"]
 
+NUMPAD_KEYS = [
+    'numpad4',
+    'numpad2',
+    'numpad8',
+    'numpad9',
+    'numpad1',
+    'numpad5',
+    'numpad0',
+    'numpad6',
+    'numpad7',
+    'numpad3',
+    'numpadsubstract',
+    'numpaddivide',
+    'numpadenter',
+    'numpadadd',
+    'numpaddecimal'
+    ]
 ARROW_KEYS = ["up", "down", "right", "left"]
 CORRECTION_KEYS = ["delete", "backspace"]
 SHIFT_KEYS = ["shift", "rshift"]
+ENTER_KEYS = ["enter"]
+TAB_KEYS = ["tab"]
+
 
 
 def _transform_key_events(group):
@@ -60,7 +80,7 @@ def add_key_dynamics(key_df):
 
     return key_df
 
-def aggregate_basic_key_features(key_df):
+def aggregate_basic_key_dynamics(key_df):
     key_df = key_df.copy()
 
     aggregated_features = key_df.groupby(level=TEST_LEVEL).agg(
@@ -76,20 +96,34 @@ def aggregate_basic_key_features(key_df):
 
     return aggregated_features
 
-def aggregate_selected_key_counts(key_df, numpad=True, arrows=True, shift=True, correction=True, tab=True):
-    NUMPAD_KEYS = [key for key in key_df["Key"].unique() if key.startswith("num")]
+def aggregate_selected_key_counts(key_df, key_groups):
 
     key_df = key_df.copy()
-
-    bins = {}
     
-    for bin in bins:
-        df = key_df[key_df["Key"].isin(counted_keys)]
-        counts = df.groupby(pd.Grouper(level="User ID"),
-            pd.Grouper(level="Is Genuine"),
-            pd.Grouper(level="Test ID"),
-            "Key")["Event"].count().unstack().rename(bin)
+    counts = key_df.groupby(level=TEST_LEVEL).apply(
+        lambda g: pd.Series({
+        f"{group}_count": g["Key"].isin(keys).sum().astype("int")
+        for group, keys in key_groups.items()
+        })
+    )
 
-        
+    return counts
+
+
+def aggregate_selected_key_dynamics(key_df, key_groups, features):
+    iqr=lambda x: x.quantile(.75) - x.quantile(.25)
+
+    key_df = key_df.copy()
+    funcs = ["mean", iqr]
+    
+    counts = key_df.groupby(level=TEST_LEVEL).apply(
+        lambda g: pd.Series({
+        f"{group}_{feature}_{func}": g[g["Key"].isin(keys)][feature].agg(func)
+        for group, keys in key_groups.items()
+        for feature in features
+        for func in funcs
+        })
+    )
+
     return counts
     
