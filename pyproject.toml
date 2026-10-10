@@ -1,26 +1,20 @@
 [project]
 name = "behavioral-ml"
 version = "0.1.0"
-description = "Add your description here"
+description = "KMT behavioral authentication"
 readme = "README.md"
 authors = [
     { name = "Mateusz Heldt", email = "23269740+m-heldt@users.noreply.github.com" }
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "catboost>=1.2.10",
     "ipykernel>=7.4.0",
-    "lightgbm>=4.7.0",
     "matplotlib>=3.11.2",
     "mlflow>=3.16.1",
-    "ngboost>=0.5.11",
     "numpy>=2.5.3",
-    "openpyxl>=3.1.5",
     "pandas>=3.0.6",
     "pooch>=1.9.0",
     "pyod>=3.6.6",
-    "pytest>=9.1.1",
-    "pytest-cov>=7.1.0",
     "scikit-learn>=1.9.1",
     "seaborn>=0.13.2",
     "xgboost>=3.4.1",
@@ -32,3 +26,9 @@ behavioral-ml = "behavioral_ml:main"
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+]

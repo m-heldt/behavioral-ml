@@ -4,10 +4,6 @@ import pandas as pd
 TEST_LEVEL = ["User ID", "Is Genuine", "Test ID"]
 MOVEMENT_LEVEL = TEST_LEVEL + ["Movement ID"]
 
-ARROW_KEYS = ["up", "down", "right", "left"]
-CORRECTION_KEYS = ["delete", "backspace"]
-SHIFT_KEYS = ["shift", "rshift"]
-
 def add_mouse_kinematics(df):
     df = df.copy()
     df[['X', 'Y']] = df["Coordinates"].to_list()
@@ -150,89 +146,6 @@ def aggregate_button_features(mouse_df):
     Dwell_Time_std=("Dwell Time", "std"),
     Click_count=("Dwell Time", "count")
     )
-    aggregated_features.fillna(0, inplace=True)
+    # aggregated_features.fillna(0, inplace=True)
 
     return aggregated_features
-
-
-
-def _transform_key_events(group):
-    presses = []
-    active_presses = {}
-    for key, event, epoch in group[["Key", "Event", "Epoch"]].itertuples(index=False):
-        if (event == "pressed") and (key not in active_presses):
-            active_presses[key] = {
-                "Key": key,
-                "Down": epoch,
-                "Epochs": [epoch]
-            }
-        elif (event == "released") and (key in active_presses):
-            active_presses[key]["Up"] = epoch
-            presses.append(active_presses.pop(key))
-        elif (event == "pressed") and (key in active_presses):
-            active_presses[key]["Epochs"].append(epoch)
-        elif (event == "released") and (key not in active_presses):
-            presses.append({
-                "Key": key,
-                "Down": epoch,
-                "Epochs": [epoch],
-                "Release Only": True
-            })
-    
-    presses += active_presses.values()
-    presses = sorted(presses, key=lambda x: x["Down"])
-
-    presses = pd.DataFrame(presses)
-    return presses
-
-def transform_key_events(key_df):
-    return key_df.groupby(level=TEST_LEVEL).apply(_transform_key_events)
-
-def add_key_dynamics(key_df):
-    key_df = key_df.copy()
-    key_df = transform_key_events(key_df)    
-
-    next_key_df = key_df.groupby(level=TEST_LEVEL).shift(-1).rename({
-    "Key": "Next Key",
-    "Down": "Next Down",
-    "Up": "Next Up"
-    }, axis=1)
-
-    key_df = key_df.join(next_key_df[["Next Key", "Next Down", "Next Up"]])
-    key_df["Dwell Time"] = key_df["Up"] - key_df["Down"]
-    key_df["UU"] = key_df["Next Up"] - key_df["Up"]
-    key_df["DD"] = key_df["Next Down"] - key_df["Down"]
-    key_df["Flight Time"] = key_df["Next Down"] - key_df["Up"]
-    key_df.drop(["Next Key", "Next Down", "Next Up"], axis=1, inplace=True)
-
-    return key_df
-
-def aggregate_basic_key_features(key_df):
-    key_df = key_df.copy()
-
-    aggregated_features = key_df.groupby(level=TEST_LEVEL).agg(
-    Dwell_median=("Dwell Time", "median"),
-    Dwell_iqr=("Dwell Time", lambda x: x.quantile(.75) - x.quantile(.25)),
-    Flight_median=("Flight Time", "median"),
-    Flight_iqr=("Flight Time", lambda x: x.quantile(.75) - x.quantile(.25))
-    )
-
-    return aggregated_features
-
-def aggregate_selected_key_counts(key_df, numpad=True, arrows=True, shift=True, correction=True, tab=True):
-    NUMPAD_KEYS = [key for key in key_df["Key"].unique() if key.startswith("num")]
-
-    key_df = key_df.copy()
-
-    bins = {}
-    
-    for bin in bins:
-        df = key_df[key_df["Key"].isin(counted_keys)]
-        counts = df.groupby(pd.Grouper(level="User ID"),
-            pd.Grouper(level="Is Genuine"),
-            pd.Grouper(level="Test ID"),
-            "Key")["Event"].count().unstack().rename(bin)
-
-        
-    return counts
-    
