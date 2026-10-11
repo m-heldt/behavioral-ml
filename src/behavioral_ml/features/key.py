@@ -53,9 +53,9 @@ def _transform_key_events(group):
             })
     
     presses += active_presses.values()
-    presses = sorted(presses, key=lambda x: x["Down"])
-
+    presses = sorted(presses, key=lambda x: x["Down"]) 
     presses = pd.DataFrame(presses)
+    
     return presses
 
 def transform_key_events(key_df):
