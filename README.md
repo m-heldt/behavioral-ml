@@ -44,7 +44,7 @@ The data isn't included in this repository. It's available on Mendeley Data unde
 | Logistic regression per user | 30 | stratified 5-fold CV | accuracy 0.855 ± 0.095 |
 | SVC (RBF) per user | 30 | stratified 5-fold CV | accuracy 0.853 ± 0.083 |
 | Logistic regression per user | 4 keyboard timing features | 5-fold CV; out-of-fold scores pooled over users, one global threshold | ROC AUC 0.851, **EER 0.218** |
-| One-class template (median of standardized features, Manhattan distance) | 4 keyboard timing features | enroll on genuine attempts 1–5; test on genuine 6–10 and the 10 impostor attempts | mean per-user ROC AUC 0.921 (median 0.98) |
+| One-class template (median of standardized features, Manhattan distance) | 4 keyboard timing features | enroll on genuine attempts 1–5; test on genuine 6–10 and the 10 impostor attempts | mean per-user ROC AUC 0.921 (median 0.97) |
 
 Accuracies are means over the 88 users (± std across users). The accuracy rows aren't directly comparable with the paper (different split, more features). A pooled EER with one global threshold is a stricter measure than per-user AUC, so the last two rows aren't comparable with each other either.
 

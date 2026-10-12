@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.metrics import roc_curve, roc_auc_score, DetCurveDisplay
+from sklearn.metrics import roc_curve, roc_auc_score, DetCurveDisplay, accuracy_score, balanced_accuracy_score
 
 def get_eer(far, frr, thresholds):
     idx = np.argmin(np.abs(far - frr))
@@ -8,24 +8,25 @@ def get_eer(far, frr, thresholds):
     eer = (far[idx] + frr[idx]) / 2
     eer_threshold = thresholds[idx]
 
-    print(f"EER: {eer:.3f}")
-    print(f"EER threshold: {eer_threshold:.3f}")
-
     return eer, eer_threshold
 
+def get_eer_from_scores(y_true, y_score):
+    far, tar, thresholds = roc_curve(y_true, y_score)
+    frr = 1 - tar
+    eer, eer_threshold = get_eer(far, frr, thresholds)
+
+    return eer
 
 def get_metrics(y_true, y_score):
     far, tar, thresholds = roc_curve(y_true, y_score)
-    auc = roc_auc_score(y_true, y_score)
     frr = 1 - tar
-
     eer, eer_threshold = get_eer(far, frr, thresholds)
 
     metrics = {}
     metrics["far"] = far
     metrics["tar"] = tar
     metrics["thresholds"] = thresholds
-    metrics["auc"] = auc
+    metrics["auc"] = roc_auc_score(y_true, y_score)
     metrics["frr"] = frr
     metrics["eer"] = eer
     metrics["eer_threshold"] = eer_threshold
@@ -62,12 +63,12 @@ def plot_eer_threshold(metrics):
     plt.show()
 
 
-def plot_det_curve(metrics, classifier_name):
+def plot_det_curve(metrics, classifier_name=None):
     _, ax = plt.subplots(figsize=(7, 5))
     DetCurveDisplay(
         fpr=metrics["far"], 
         fnr=metrics["frr"], 
-        classifier_name=classifier_name
+        estimator_name=classifier_name
         ).plot(ax=ax)
 
     ax.set_xlabel("False Acceptance Rate (FAR)")
