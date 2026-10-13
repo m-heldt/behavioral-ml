@@ -34,8 +34,11 @@ def add_button_features(mouse_df):
 
     mouse_df = mouse_df.copy()
 
-    button_features = mouse_df.loc[(mouse_df["Event"] != "movement") & mouse_df["Button"].isin(MOUSE_BUTTONS)].copy()
-    g = button_features.groupby([
+    button_features = mouse_df.loc[mouse_df["Event"] != "movement"].copy()
+    button_features[["Button", "Button Event"]] = button_features["Event"].str.split(" ", expand=True)
+
+    click_features = button_features.loc[button_features["Button"].isin(MOUSE_BUTTONS)]
+    g = click_features.groupby([
         pd.Grouper(level="User ID"),
         pd.Grouper(level="Is Genuine"),
         pd.Grouper(level="Test ID"),
@@ -48,7 +51,7 @@ def add_button_features(mouse_df):
     button_features["Dwell Time"] = np.where(valid_press, button_features["Next Epoch"] - button_features["Epoch"], np.nan)
     
     
-    scroll = mouse_df.loc[mouse_df["Button"].isin(SCROLL_TYPES) & mouse_df["Button Event"].eq("press") & (mouse_df["Event"] != "movement")].copy()
+    scroll = button_features.loc[button_features["Button"].isin(SCROLL_TYPES) & button_features["Button Event"].eq("press")]
     g = scroll.groupby(level=TEST_LEVEL)
     scroll["Interscroll Time"] = g["Epoch"].diff()
 
@@ -63,7 +66,7 @@ def add_button_features(mouse_df):
     )
 
 
-    return mouse_df.join(button_features[["Dwell Time"]]).join(scroll[["Burst ID"]])
+    return mouse_df.join(button_features[["Dwell Time"]]).join(scroll[["Burst ID"]]).fillna({"Burst ID": 0})
 
 
 def derive_per_movement_features(mouse_df, min_Path=5.):
@@ -142,8 +145,8 @@ def aggregate_button_features(mouse_df):
 
     aggregated_features = mouse_df.groupby(level=TEST_LEVEL).agg(
     Burst_count=("Burst ID", "max"),
-    Dwell_Time_mean=("Dwell Time", "mean"),
-    Dwell_Time_std=("Dwell Time", "std"),
+    Click_Dwell_Time_mean=("Dwell Time", "mean"),
+    Click_Dwell_Time_std=("Dwell Time", "std"),
     Click_count=("Dwell Time", "count")
     )
     # aggregated_features.fillna(0, inplace=True)
