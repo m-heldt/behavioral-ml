@@ -35,7 +35,7 @@ Repository map:
 - `src/behavioral_ml/features/key.py` and `mouse.py`: event processing and features.
 - `src/behavioral_ml/train.py`: enrollment, comparison vectors, and model scoring.
 - `src/behavioral_ml/evaluation.py`: verification metrics and plots.
-- `src/behavioral_ml/experiment.py`: legacy scaffold; inspect before using it.
+- `src/behavioral_ml/experiment.py`: shared baseline runner and artifact exports.
 - `tests/unit/` and `tests/fixtures/`: project tests and small reference data.
 - `scripts/download_dataset.py`: checksum-verified KMT download.
 
@@ -63,7 +63,8 @@ uv run --locked python scripts/download_dataset.py
 
 Do not rerun the download over an existing dataset as a routine check. Current
 notebooks resolve `../data/raw_kmt_dataset` relative to `notebooks/`; use the
-project environment and that working directory when executing them.
+project environment and that working directory when executing them. Set
+`KMT_DATA_DIR` to an absolute path to reuse an existing read-only dataset.
 
 ## Code and notebook conventions
 

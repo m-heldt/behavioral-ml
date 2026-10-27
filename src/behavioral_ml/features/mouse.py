@@ -6,6 +6,9 @@ MOVEMENT_LEVEL = TEST_LEVEL + ["Movement ID"]
 
 def add_mouse_kinematics(df):
     df = df.copy()
+    # Raw attempt metadata stays on the source table. pandas deep-copies attrs
+    # into every group/Series, which is prohibitively costly for event features.
+    df.attrs = {}
     df[['X', 'Y']] = df["Coordinates"].to_list()
 
     df_mov = df.loc[df["Event"] == "movement"]
@@ -14,28 +17,33 @@ def add_mouse_kinematics(df):
     df["dY"] = g["Y"].diff()
     df["dS"] = np.hypot(df["dX"], df["dY"])
     df["dT"] = g["Epoch"].diff()
-    df["V"] =  df["dS"] / df["dT"]
+    if df["dT"].lt(0).any():
+        raise ValueError("Mouse events must be chronological within each movement")
+    # Keep tied-time coordinates for path geometry. Their instantaneous rates
+    # are undefined; never remove the event or divide by zero to obtain them.
+    positive_dt = df["dT"].where(df["dT"].gt(0))
+    df["V"] = df["dS"] / positive_dt
 
     df_mov = df.loc[df["Event"] == "movement"]
     g = df_mov.groupby(level=MOVEMENT_LEVEL, sort=False)
-    df["A"] = g["V"].diff() / df["dT"]
+    df["A"] = g["V"].diff() / positive_dt
 
     df_mov = df.loc[df["Event"] == "movement"]
     g = df_mov.groupby(level=MOVEMENT_LEVEL, sort=False)
-    df["Jerk"] = g["A"].diff() / df["dT"]
+    df["Jerk"] = g["A"].diff() / positive_dt
 
     return df
 
 
-def add_button_features(mouse_df):
+def add_button_features(mouse_df, scroll_threshold=0.3):
     MOUSE_BUTTONS = ["left", "right", "mouse4"]
     SCROLL_TYPES = ["scrollup", "scrolldown"]
-    SCROLL_THRESHOLD = 0.3
 
     mouse_df = mouse_df.copy()
+    mouse_df.attrs = {}
 
     button_features = mouse_df.loc[mouse_df["Event"] != "movement"].copy()
-    button_features[["Button", "Button Event"]] = button_features["Event"].str.split(" ", expand=True)
+    button_features[["Button", "Button Event"]] = button_features["Event"].str.split(" ", n=1, expand=True).reindex(columns=[0, 1])
 
     click_features = button_features.loc[button_features["Button"].isin(MOUSE_BUTTONS)]
     g = click_features.groupby([
@@ -51,13 +59,13 @@ def add_button_features(mouse_df):
     button_features["Dwell Time"] = np.where(valid_press, button_features["Next Epoch"] - button_features["Epoch"], np.nan)
     
     
-    scroll = button_features.loc[button_features["Button"].isin(SCROLL_TYPES) & button_features["Button Event"].eq("press")]
+    scroll = button_features.loc[button_features["Button"].isin(SCROLL_TYPES) & button_features["Button Event"].eq("press")].copy()
     g = scroll.groupby(level=TEST_LEVEL)
     scroll["Interscroll Time"] = g["Epoch"].diff()
 
     scroll["New Burst"] = (
         scroll["Interscroll Time"].isna()
-        | scroll["Interscroll Time"].gt(SCROLL_THRESHOLD)
+        | scroll["Interscroll Time"].gt(scroll_threshold)
     )
 
     scroll["Burst ID"] = (
@@ -71,6 +79,7 @@ def add_button_features(mouse_df):
 
 def derive_per_movement_features(mouse_df, min_Path=5.):
     movement_df = mouse_df.loc[mouse_df["Event"] == "movement"].copy()
+    movement_df.attrs = {}
     
     displacement = movement_df.groupby(level=MOVEMENT_LEVEL).apply(
         lambda group: np.hypot(group["X"].iloc[-1] - group["X"].iloc[0], group["Y"].iloc[-1] - group["Y"].iloc[0])
@@ -95,8 +104,8 @@ def derive_per_movement_features(mouse_df, min_Path=5.):
         .join(displacement, how="outer")
     )
 
-    per_movement_features["Straightness"] = per_movement_features["Displacement"] / per_movement_features["Path"]
-    per_movement_features["V_avg"] = per_movement_features["Path"] / per_movement_features["Duration"]
+    per_movement_features["Straightness"] = per_movement_features["Displacement"] / per_movement_features["Path"].where(per_movement_features["Path"].gt(0))
+    per_movement_features["V_avg"] = per_movement_features["Path"] / per_movement_features["Duration"].where(per_movement_features["Duration"].gt(0))
 
 
     return per_movement_features[per_movement_features["Path"] >= min_Path]
@@ -130,13 +139,13 @@ def aggregate_movement_features(mouse_df):
 def aggregate_movement_features_v2(mouse_df):
     per_movement_features = derive_per_movement_features(mouse_df)
     
-    iqr=lambda x: x.quantile(.75) - x.quantile(.25)
-    agg_funcs = ["mean", "std", "median", iqr]
+    agg_funcs = {"mean": "mean", "std": "std", "median": "median",
+                 "iqr": lambda x: x.quantile(.75) - x.quantile(.25)}
 
     aggs = {}
     for col in per_movement_features:
-        for func in agg_funcs:
-            aggs[f"{col}_{func}"] = (f"{col}", func)
+        for name, func in agg_funcs.items():
+            aggs[f"{col}_{name}"] = (col, func)
 
     return per_movement_features.groupby(level=TEST_LEVEL).agg(**aggs)
 

@@ -1,122 +1,179 @@
-# Behavioral biometrics: keystroke and mouse dynamics on a payment form
+# Behavioral biometrics: keyboard and mouse dynamics on a payment form
 
-Can we tell whether the person typing card details is the card's owner, just from *how* they type and move the mouse?
+Can behavior on a payment form help distinguish the claimed card owner from an
+impostor? This project audits public input-event logs, builds behavioral features,
+and compares supervised classifiers with genuine-only enrollment.
 
-This project explores a public keystroke and mouse dynamics dataset (88 users, 1,760 form-filling attempts), engineers behavioral features from raw input events and builds per-user models that separate genuine users from impostors.
-
-> **Status:** work in progress. EDA and feature engineering are done; evaluation with biometric metrics (ROC, DET, EER) is in progress in `notebooks/models.ipynb`.
-
-## Why it matters
-
-Banks and payment providers use behavioral biometrics as a passive risk signal. If the behavior on a payment form doesn't match the card owner's usual behavior, the transaction can be stepped up to stronger authentication, while genuine customers pass without extra friction.
+The project is a small, within-session research study motivated by a Junior Data
+Scientist role at Digital Fingerprints. It demonstrates data inspection, feature
+engineering, reusable Python, regression tests, and explicit model evaluation.
 
 ## Data
 
-**KMT dataset** (keystroke, mouse and touchscreen dynamics), Nnamoko et al. (2022):
-- 88 participants typed fictitious card details (name, card number, CVC, expiry date) into a GUI app resembling an online payment form. The app was built with the Kivy library and logged every key and mouse event with timestamps.
-- Each card has **10 genuine attempts**, typed by its assigned user, and **10 impostor attempts**, typed by 10 other participants once each: 1,760 attempts in total.
-- The raw data has about 173k key events (key, press/release, text field, time) and 707k mouse events (event type, coordinates, time, movement ID).
+The **KMT dataset**, Nnamoko et al. (2022), contains 88 participants and 1,760
+attempts on a simulated payment form. Each claimed card owner has 10 genuine
+attempts and 10 attempts by other participants. The raw logs contain 172,563
+keyboard events and 706,984 nonempty mouse events, plus one undocumented
+`false_enters` trailer per attempt.
 
-The data isn't included in this repository. It's available on Mendeley Data under the CC BY 4.0 license (see [Getting started](#getting-started)).
+The dataset is not versioned here. Download it from Mendeley Data using the
+checksum-verified script below. Its license is CC BY 4.0.
 
-## Approach
+## Pipeline and data-quality decisions
 
-1. **Exploratory data analysis** ([`notebooks/eda.ipynb`](notebooks/eda.ipynb)): data structure, data quality and potential discriminating habits. Main findings:
-   - Not every key press has a matching release: a held key is logged as a series of `pressed` events (operating-system auto-repeat).
-   - The `tab` key-down is almost never logged, only its release.
-   - Each attempt's mouse events end with an empty record holding only an undocumented `false_enters` field.
-   - Clicks have no `Movement ID`, and click coordinates carry floating-point noise.
-2. **Feature engineering** ([`notebooks/features.ipynb`](notebooks/features.ipynb), [`src/behavioral_ml/features.py`](src/behavioral_ml/features.py)): raw key events are first converted into one row per physical key press, merging auto-repeats. Then 30 features are computed per attempt:
-   - **keyboard timing:** dwell time (how long a key is held) and flight time (release to next press), as median and IQR;
-   - **mouse movement:** path length, duration, straightness, and velocity, acceleration and jerk statistics per movement, aggregated per attempt;
-   - **clicks and scrolling:** click dwell time, number of clicks, scroll bursts;
-   - **habits:** counts of `tab`, numpad, arrow, correction (`backspace`, `delete`), `capslock`, `enter` and `spacebar` presses.
-3. **Models** ([`notebooks/features.ipynb`](notebooks/features.ipynb), [`notebooks/models.ipynb`](notebooks/models.ipynb)):
-   - one classifier per user (genuine vs impostor), as in the paper: decision tree, logistic regression, XGBoost and SVC;
-   - biometric evaluation: ROC and DET curves, and the equal error rate (EER);
-   - a one-class template detector enrolled on genuine attempts only, which is the realistic setting: at enrollment a bank has only the customer's own data.
+1. **Inspect raw events** in [eda.ipynb](notebooks/eda.ipynb): auto-repeat, missing
+   Tab key-downs, trailing metadata records, and mouse event structure.
+2. **Explain feature development** in [features.ipynb](notebooks/features.ipynb).
+   Earlier naive stages remain as an explicitly historical exploration record.
+3. **Build features** with [the package](src/behavioral_ml/features/):
+   18 keyboard features, 21 mouse features, and their 39-feature combination.
+4. **Run fixed baselines** in [models.ipynb](notebooks/models.ipynb) or from the
+   command line. Both use the same scoring and reporting functions.
 
-## Results so far
+Cleaning preserves event order and attempt identity. Auto-repeat becomes one
+physical action. Release-only Tab events count as navigation actions but do not
+provide an observed press time for dwell, DD, UU, or flight calculations.
+Flight means release-to-next-press; negative values can represent key overlap.
 
-| Setup | Features | Evaluation | Result |
-|---|---|---|---|
-| Paper baseline: decision tree per user | 3 (average dwell, flight, mouse trajectory) | stratified 80/20 split | accuracy 75.85% |
-| Logistic regression per user | 30 | stratified 5-fold CV | accuracy 0.855 ± 0.095 |
-| SVC (RBF) per user | 30 | stratified 5-fold CV | accuracy 0.853 ± 0.083 |
-| Logistic regression per user | 4 keyboard timing features | 5-fold CV; out-of-fold scores pooled over users, one global threshold | ROC AUC 0.851, **EER 0.218** |
-| One-class template (median of standardized features, Manhattan distance) | 4 keyboard timing features | enroll on genuine attempts 1–5; test on genuine 6–10 and the 10 impostor attempts | mean per-user ROC AUC 0.921 (median 0.97) |
+Tied-time mouse coordinates remain part of path geometry. Instantaneous rates
+with zero elapsed time are undefined and stay missing. No-click dwell also
+remains missing. Imputation is fitted inside the relevant enrollment/training
+boundary. Optional keyboard fields are retained, and undocumented
+`false_enters` values are preserved as loader metadata rather than interpreted
+as behavioral features.
 
-Accuracies are means over the 88 users (± std across users). The accuracy rows aren't directly comparable with the paper (different split, more features). A pooled EER with one global threshold is a stricter measure than per-user AUC, so the last two rows aren't comparable with each other either.
+## Evaluation protocols
 
-## Insights
+**P1** is a per-user logistic classifier with genuine and impostor training data,
+using stratified 5-fold out-of-fold scores. It is a supervised research reference;
+a newly enrolled customer would not supply same-card impostor examples.
 
-- **Raw logs need cleaning before timing features make sense.** The first repeated press of a held key comes after about 0.25 s or about 0.5 s, then repeats follow every ~28 ms. That pattern is auto-repeat, not real presses. Of 3,188 `tab` presses, 3,169 have no logged key-down.
-- **Habits differ between attempts.** Only 901 of 1,760 attempts use `tab` to move between fields at all, which makes navigation style a candidate feature.
-- **Accuracy is a poor metric here.** With 4–5 test attempts per user, one error changes a user's accuracy by 20–25 percentage points. This is why the evaluation moves to ROC curves and EER.
-- **Genuine-only enrollment already works for most users.** The one-class template reaches a median per-user AUC of 0.98, but the worst user is at 0.22, so the error is very uneven across users.
+**P2** enrolls on genuine attempts 1–5 and probes genuine attempts 6–10 plus the
+10 same-card impostors. Personal templates and detectors fit only enrollment
+data. Global verifiers learn from other users' absolute template-to-probe
+differences, with shared preprocessing fitted inside each training fold.
 
-## Limitations
+The default model comparison uses the same 18 keyboard features. The median/std
+Manhattan template and mean/MAD scaled-Manhattan template are distinct methods.
+Isolation Forest has a fixed seed and uses the same preprocessing/feature set
+as the other default sklearn detectors.
 
-- **One session per user.** All genuine attempts come from a single sitting, so the results are within-session and likely optimistic; behavior drifts across days.
-- **Practice asymmetry.** The genuine user types the same card 10 times, while each impostor types it once, so models may partly learn familiarity rather than identity.
-- **Lab setting.** Fictitious card details, one GUI app, 88 participants and balanced classes, unlike real-world fraud.
-- **Unrealistic training data.** The per-user binary classifiers are trained on impostor attempts on the same card, which a real system wouldn't have at enrollment.
+### Inferred impostor identities
 
-## Next steps
+KMT does not record impostor participant IDs. Grouping by card owner alone can
+place a test impostor's own genuine records in training.
 
-- Evaluate all models under one protocol with biometric metrics: EER and false rejection rate at a fixed false acceptance rate.
-- Compare genuine-only detectors with a global verifier trained on other users.
-- Add per-field features from the `Input Box` column (time per field, `tab` vs mouse navigation).
-- Move the notebook feature code into the package and cover it with unit tests.
-- Track experiments with MLflow.
+The loader therefore infers **all plausible preceding-session candidates**:
+other users whose genuine session ended within one hour before an impostor
+attempt. There are 519 attempts with one candidate and 361 with multiple
+candidates. These are timestamp-based possibilities, not recovered ground truth.
 
-## Repository structure
+In each global fold, a row is usable only if its claimed owner and **every**
+candidate typist belong to the same side of the split. Unknown and cross-fold
+candidates are excluded. Separation is conditional on the one-hour attribution
+assumption; recorded participant IDs would be needed to verify it directly.
 
-```
-├── notebooks/
-│   ├── eda.ipynb            # exploratory data analysis of the raw events
-│   ├── features.ipynb       # feature engineering log and baseline models
-│   └── models.ipynb         # biometric evaluation (ROC, DET, EER), one-class detector
-├── src/behavioral_ml/
-│   ├── etl.py               # load_data: raw JSON files -> event-level DataFrames
-│   └── features.py          # mouse kinematics, click/scroll and keystroke features
-├── scripts/
-│   └── download_dataset.py  # downloads the raw dataset into data/raw_kmt_dataset/
-├── tests/                   # unit tests (planned)
-├── data/raw_kmt_dataset/    # raw JSON files (not in the repository)
-├── pyproject.toml
-└── uv.lock
-```
+## Current fixed-baseline results
 
-## Getting started
+These results use the **same 552 P2 probe rows for every method**: 440 genuine
+and 112 impostor attempts. This is the common subset retained by conservative
+global identity filtering; 768 of the original 880 impostor probes are excluded.
+P1 is restricted to these rows for reporting but retains its different training
+information.
 
-Requirements: Python 3.13 and [uv](https://docs.astral.sh/uv/).
+| Experiment | Pooled ROC AUC | Pooled EER | FRR at observed FAR ≤ 1% |
+|---|---:|---:|---:|
+| P1 logistic regression | 0.923 | 0.116 | 0.993 |
+| P2 median/std Manhattan template | 0.916 | 0.179 | 0.736 |
+| P2 mean/MAD scaled Manhattan | 0.908 | 0.188 | 0.836 |
+| P2 One-Class SVM | 0.907 | 0.160 | 0.661 |
+| P2 Isolation Forest | 0.683 | 0.385 | 0.950 |
+| P2 global SVC | 0.905 | 0.168 | 0.643 |
+| P2 global logistic regression | 0.927 | 0.162 | 0.625 |
+
+Settings are fixed baselines, with five folds and random seed 42; they have not
+been optimized against these results. EER is the average FAR/FRR at the full ROC
+point closest to their crossing (`drop_intermediate=False`), not an interpolated
+operating threshold.
+
+Pooled metrics and per-user metrics answer different questions. Only 61 users
+have both classes in this restricted subset; undefined per-user metrics for the
+others are reported as missing. Complete per-user distributions and full-probe
+results are generated alongside the common-probe comparison.
+
+**These are descriptive evaluation statistics.** A 1% FAR target here allows
+only one observed false acceptance among 112 impostors. It is not evidence of
+a deployed 1% FAR. Independently trained per-user score scales are uncalibrated,
+which can also make pooled low-FAR behavior poor despite a useful AUC.
+Deployment thresholds require separate calibration followed by untouched testing.
+
+The paper's reported 75.85% decision-tree accuracy uses different features and
+evaluation. No matched improvement over that result is claimed.
+
+## Limitations and next investigations
+
+- **One sitting per genuine user:** this does not measure cross-day stability.
+- **Practice and content asymmetry:** genuine users repeat assigned details;
+  impostors enter unfamiliar details. Familiarity and identity are coupled.
+- **Inferred identities:** conservative filtering reduces coverage substantially,
+  and its timestamp assumptions cannot be verified from recorded attacker IDs.
+- **Small, controlled dataset:** fictitious details, one GUI, balanced labels,
+  and few probes do not reproduce real fraud prevalence or practised attacks.
+- **Exploratory evaluation:** no independent threshold calibration, hyperparameter
+  selection study, or confidence-interval claim is made.
+
+Useful extensions include keyboard/mouse ablations, recorded-person-disjoint
+cross-session data, calibration, and experiment tracking. They are separate from
+the correctness fixes implemented here.
+
+## Reproduce
+
+Use Python 3.13 and [uv](https://docs.astral.sh/uv/), from the repository root:
 
 ```bash
-uv sync
+uv sync --locked
+uv run --locked python scripts/download_dataset.py
+uv run --locked python -m pytest -q
+uv run --locked behavioral-ml --output-dir artifacts
 ```
 
-Download the dataset by running this from the repository root:
+The downloader verifies SHA-256
+`4fd279eab07ba65be0d3b4f79943d176abe1a36b16927f568b199d7ae5638739`
+for the archive, keeps the raw JSON files in `data/raw_kmt_dataset/`, and leaves
+an existing complete dataset untouched. It refuses to overwrite an incomplete
+existing directory.
 
-```bash
-uv run python scripts/download_dataset.py
-```
+Alternatively, open the notebooks with the project environment and
+`notebooks/` as the working directory. Read them in EDA → features → models
+order; the model notebook rebuilds its own inputs and does not depend on another
+notebook's state. Set `KMT_DATA_DIR` to an absolute path to reuse an existing
+read-only dataset in either the notebooks or command line.
 
-The script downloads the [Behaviour Biometrics Dataset](https://data.mendeley.com/datasets/fnf8b85kr6/1) archive from Mendeley Data, verifies its SHA-256 checksum, and keeps only the raw JSON files (`raw_kmt_user_0001.json` … `raw_kmt_user_0088.json`) in `data/raw_kmt_dataset/`.
+The ignored `artifacts/` directory contains:
 
-Then open the notebooks with the project's virtual environment as the kernel (e.g. in VS Code), or start Jupyter with:
+- `predictions.csv`: experiment, user, label, attempt, score, and fold.
+- `all_probes_metrics.csv` and `common_probes_metrics.csv`: explicitly separate
+  coverage and comparisons.
+- `per_user_common_probes.csv`: one row per experiment/user, including counts.
+- `configuration.json`: settings, versions, revision, source hashes, raw-file
+  checksums, attribution assumption, and threshold policy.
 
-```bash
-uv run --with jupyter jupyter lab
-```
-
-Run the notebooks in order: `eda.ipynb` → `features.ipynb` → `models.ipynb`.
+See [the feedback resolution record](docs/feedback-resolution.md) for the scope
+and validation of the corrections.
 
 ## Use of AI tools
 
-I used AI assistants as reviewers: Claude (Anthropic) and ChatGPT (OpenAI) for review and suggestions on the evaluation protocol and the code. Claude also proofread the notebook comments and drafted this README. The code and the analysis are my own.
+The initial code and analysis were written by me with review from ChatGPT and
+Claude. Claude also helped with notebook prose and the original README.
+Subsequent corrections and consolidation were developed with Codex, including
+regression tests, indexed scoring, protocol checks, and updated documentation.
 
 ## References
 
-- N. Nnamoko, J. Barrowclough, M. Liptrott, I. Korkontzelos (2022). *A behaviour biometrics dataset for user identification and authentication.* Data in Brief 45, 108728. [doi:10.1016/j.dib.2022.108728](https://doi.org/10.1016/j.dib.2022.108728)
-- N. Nnamoko, J. Barrowclough, M. Liptrott, I. Korkontzelos (2022). *Behaviour Biometrics Dataset*, Mendeley Data, v1. [doi:10.17632/fnf8b85kr6.1](https://doi.org/10.17632/fnf8b85kr6.1). License: CC BY 4.0.
+- N. Nnamoko, J. Barrowclough, M. Liptrott, I. Korkontzelos (2022).
+  *A behaviour biometrics dataset for user identification and authentication*.
+  Data in Brief 45, 108728.
+  [Paper](https://doi.org/10.1016/j.dib.2022.108728).
+- N. Nnamoko et al. (2022). *Behaviour Biometrics Dataset*, Mendeley Data, v1.
+  [Dataset](https://doi.org/10.17632/fnf8b85kr6.1). CC BY 4.0.
+- [scikit-learn ROC documentation](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.roc_curve.html).

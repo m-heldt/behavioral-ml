@@ -1,2 +1,4 @@
 def main() -> None:
-    print("Hello from behavioral-ml!")
+    """Console entry point; defer ML imports until invoked."""
+    from .experiment import main as run
+    run()

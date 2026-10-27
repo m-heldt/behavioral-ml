@@ -19,5 +19,14 @@ FEEDBACK.md
 
 features_bak.py
 
+# Generated experiment outputs and notebook caches
+artifacts/
+mlruns/
+mlartifacts/
+.ipynb_checkpoints/
+.pytest_cache/
+.coverage
+htmlcov/
+
 # Job posting
 Data Scientist (Junior) - Digital Fingerprints.pdf

@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 
 TEST_LEVEL = ["User ID", "Is Genuine", "Test ID"]
@@ -51,27 +50,34 @@ def _transform_key_events(group):
                 "Epochs": [epoch],
                 "Release Only": True
             })
-    
+
     presses += active_presses.values()
-    presses = sorted(presses, key=lambda x: x["Down"]) 
+    presses = sorted(presses, key=lambda x: x["Down"])
     presses = pd.DataFrame(presses)
-    
+    for column in ["Key", "Down", "Epochs", "Up", "Release Only"]:
+        if column not in presses:
+            presses[column] = pd.Series(index=presses.index, dtype=object if column in {"Key", "Epochs"} else float)
+
     return presses
 
 def transform_key_events(key_df):
     return key_df.groupby(level=TEST_LEVEL).apply(_transform_key_events)
 
 def add_key_dynamics(key_df):
-    key_df = key_df.copy()
-    key_df = transform_key_events(key_df)    
+    key_df = transform_key_events(key_df)
+    # A release-only event has no observed Down. Keep it for habit counts,
+    # but exclude it from BOTH sides of the next-press timing calculation.
+    valid = ~key_df["Release Only"].fillna(False).astype(bool)
+    observed = key_df.loc[valid]
 
-    next_key_df = key_df.groupby(level=TEST_LEVEL).shift(-1).rename({
+    next_key_df = observed.groupby(level=TEST_LEVEL).shift(-1).rename({
     "Key": "Next Key",
     "Down": "Next Down",
     "Up": "Next Up"
     }, axis=1)
 
     key_df = key_df.join(next_key_df[["Next Key", "Next Down", "Next Up"]])
+    key_df.loc[~valid, "Down"] = float("nan")
     key_df["Dwell Time"] = key_df["Up"] - key_df["Down"]
     key_df["UU"] = key_df["Next Up"] - key_df["Up"]
     key_df["DD"] = key_df["Next Down"] - key_df["Down"]
@@ -97,9 +103,10 @@ def aggregate_basic_key_dynamics(key_df):
     return aggregated_features
 
 def aggregate_selected_key_counts(key_df, key_groups):
+    """Count physical actions on transformed events, including release-only keys."""
 
     key_df = key_df.copy()
-    
+
     counts = key_df.groupby(level=TEST_LEVEL).apply(
         lambda g: pd.Series({
         f"{group}_count": g["Key"].isin(keys).sum().astype("int")
@@ -111,19 +118,16 @@ def aggregate_selected_key_counts(key_df, key_groups):
 
 
 def aggregate_selected_key_dynamics(key_df, key_groups, features):
-    iqr=lambda x: x.quantile(.75) - x.quantile(.25)
-
     key_df = key_df.copy()
-    funcs = ["mean", iqr]
-    
+    funcs = {"mean": "mean", "iqr": lambda x: x.quantile(.75) - x.quantile(.25)}
+
     counts = key_df.groupby(level=TEST_LEVEL).apply(
         lambda g: pd.Series({
-        f"{group}_{feature}_{func}": g[g["Key"].isin(keys)][feature].agg(func)
+        f"{group}_{feature}_{func}": g[g["Key"].isin(keys)][feature].agg(operation)
         for group, keys in key_groups.items()
         for feature in features
-        for func in funcs
+        for func, operation in funcs.items()
         })
     )
 
     return counts
-    
