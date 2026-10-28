@@ -8,6 +8,7 @@ from sklearn.model_selection import GroupKFold, StratifiedKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
+from pyod.models.knn import KNN
 
 from behavioral_ml import train
 
@@ -71,6 +72,26 @@ def test_template_scale_handles_zero_spread_and_all_missing_columns():
     detector = train.TemplateDetector(center="mean", scale="mad").fit(
         np.array([[1., 5., np.nan], [3., 5., np.nan]]))
     np.testing.assert_allclose(detector.score_samples([[4., 5., np.nan]]), [-2.])
+
+
+def test_pyod_adapter_preserves_distance_direction_cloning_and_probe_independence():
+    underlying = KNN(n_neighbors=1)
+    adapter = train.PyODNoveltyAdapter(underlying).fit([[0.], [1.], [2.], [3.], [4.]])
+    np.testing.assert_allclose(adapter.decision_function([[2.], [10.]]), [0., -6.])
+    np.testing.assert_allclose(adapter.decision_function([[2.]]), [0.])
+    assert not hasattr(underlying, "decision_scores_")
+
+
+def test_pyod_pipeline_uses_enrollment_only_and_keeps_attempt_identity(features):
+    detector = make_pipeline(SimpleImputer(keep_empty_features=True), StandardScaler(),
+                             train.PyODNoveltyAdapter(KNN(n_neighbors=1)))
+    scores = train.enroll_and_score(detector, features, n_enroll=2)
+    changed = features.copy()
+    changed.loc[(10, False, 5), "timing"] = 1_000_000
+    rescored = train.enroll_and_score(detector, changed, n_enroll=2)
+    index = scores.index.drop((10, False, 5))
+    pd.testing.assert_series_equal(scores.loc[index], rescored.loc[index])
+    assert scores.index.equals(train.split_enroll_probe(features, 2)[1].index)
 
 
 class IdentityAuditClassifier(BaseEstimator):

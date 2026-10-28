@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+from importlib.metadata import version
 import os
 from pathlib import Path
 import platform
@@ -29,6 +30,11 @@ def _pipeline(estimator):
                          StandardScaler(), estimator)
 
 
+def estimator_parameters(estimator):
+    """JSON-safe resolved parameters, including pipeline preprocessing."""
+    return json.loads(json.dumps(estimator.get_params(deep=True), default=str))
+
+
 def run_baselines(feature_sets, typist_candidates, n_enroll=5, n_splits=5, random_state=42):
     """Fixed baseline settings, without selecting hyperparameters on the results."""
     keys = feature_sets["keys"]
@@ -46,6 +52,7 @@ def run_baselines(feature_sets, typist_candidates, n_enroll=5, n_splits=5, rando
     for name, detector in detectors.items():
         experiments[name] = train.enroll_and_score(detector, keys, n_enroll)
         experiments[name].attrs["estimator"] = repr(detector)
+        experiments[name].attrs["estimator_params"] = estimator_parameters(detector)
     global_models = {
         "p2.global_svc": _pipeline(SVC(kernel="rbf", gamma="scale")),
         "p2.global_logreg": _pipeline(LogisticRegression(C=1, max_iter=1000)),
@@ -55,10 +62,13 @@ def run_baselines(feature_sets, typist_candidates, n_enroll=5, n_splits=5, rando
         experiments[name] = train.cross_val_predict_global(
             model, keys, group_cv, n_enroll=n_enroll, typist_candidates=typist_candidates)
         experiments[name].attrs["estimator"] = repr(model)
+        experiments[name].attrs["estimator_params"] = estimator_parameters(model)
     for scores in experiments.values():
         scores.attrs.update(feature_set="keys", feature_columns=list(keys),
                             n_splits=n_splits, random_state=random_state)
     experiments["p1.logreg"].attrs["estimator"] = repr(_pipeline(LogisticRegression(C=1, max_iter=1000)))
+    experiments["p1.logreg"].attrs["estimator_params"] = estimator_parameters(
+        _pipeline(LogisticRegression(C=1, max_iter=1000)))
     return experiments
 
 
@@ -103,6 +113,7 @@ def write_results(experiments, output_dir, data_dir=None):
     provenance = {
         "python": platform.python_version(), "numpy": np.__version__,
         "pandas": pd.__version__, "sklearn": sklearn.__version__,
+        "pyod": version("pyod"), "mlflow": version("mlflow"),
         "git_revision": revision.stdout.strip(),
         "source_sha256": {str(path.relative_to(root)): digest(path)
                           for path in sorted((root / "src").rglob("*.py"))},
@@ -120,12 +131,17 @@ def main(argv=None):
     parser.add_argument("--data-dir", type=Path, default=Path(os.environ.get("KMT_DATA_DIR", "data/raw_kmt_dataset")))
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts"))
     parser.add_argument("--n-enroll", type=int, default=5)
+    parser.add_argument("--tracking-uri", help="MLflow URI; default: output-dir/mlflow.db (SQLite)")
+    parser.add_argument("--mlflow-experiment", default="kmt")
     args = parser.parse_args(argv)
     mouse_events, key_events = load_data(args.data_dir)
     feature_sets = build_feature_sets(mouse_events, key_events)
     candidates = infer_typist_candidates(key_events)
     experiments = run_baselines(feature_sets, candidates, n_enroll=args.n_enroll)
     write_results(experiments, args.output_dir, args.data_dir)
+    from .tracking import log_experiments
+    run_id = log_experiments(experiments, args.output_dir, args.tracking_uri, args.mlflow_experiment)
+    print(f"MLflow parent run: {run_id}")
     print(results_table(common_probe_scores(experiments)).to_string(float_format=lambda x: f"{x:.4f}"))
     return 0
 

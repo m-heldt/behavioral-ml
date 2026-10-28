@@ -104,6 +104,28 @@ def enroll_and_score(detector, features, n_enroll=5):
     return _finish_scores(scores, protocol="p2", n_enroll=n_enroll)
 
 
+class PyODNoveltyAdapter(OutlierMixin, BaseEstimator):
+    """Expose a PyOD detector with the project's higher-is-genuine scores.
+
+    Use an enrollment-fitted imputer/scaler upstream. This adapter changes
+    score direction only; it does not calibrate scores or use PyOD thresholds.
+    The wrapped detector must support independent, unseen-probe scoring.
+    """
+
+    def __init__(self, detector):
+        self.detector = detector
+
+    def fit(self, X, y=None):
+        values = validate_data(self, X)
+        self.detector_ = clone(self.detector).fit(values)
+        return self
+
+    def decision_function(self, X):
+        check_is_fitted(self, "detector_")
+        values = validate_data(self, X, reset=False)
+        return -np.asarray(self.detector_.decision_function(values), dtype=float)
+
+
 def cross_val_predict_global(model, features, cv, n_enroll=5, typist_candidates=None):
     """P2 shared verifier with conservative identity separation.
 

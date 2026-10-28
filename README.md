@@ -123,7 +123,7 @@ evaluation. No matched improvement over that result is claimed.
   selection study, or confidence-interval claim is made.
 
 Useful extensions include keyboard/mouse ablations, recorded-person-disjoint
-cross-session data, calibration, and experiment tracking. They are separate from
+cross-session data and calibration. They are separate from
 the correctness fixes implemented here.
 
 ## Reproduce
@@ -136,6 +136,23 @@ uv run --locked python scripts/download_dataset.py
 uv run --locked python -m pytest -q
 uv run --locked behavioral-ml --output-dir artifacts
 ```
+
+The CLI and model notebook also log to MLflow: a parent matrix run and one child
+per complete configuration, with full/common-probe metrics, indexed predictions,
+per-user tables, resolved settings, and ROC/DET plots. The default tracking
+database is `artifacts/mlflow.db`, with local artifacts under
+`artifacts/mlartifacts/`. All paths are resolved absolutely, including when the
+notebook runs from `notebooks/`. To view results from the repository root:
+
+```bash
+uv run --locked mlflow ui --backend-store-uri sqlite:///artifacts/mlflow.db
+```
+
+Set `MLFLOW_TRACKING_URI` or pass `--tracking-uri` to select another backend;
+`--mlflow-experiment` selects the experiment group (default `kmt`). Logging is
+explicit so all personal models belong to their configuration's run. A PyOD
+adapter reverses anomaly scores to preserve **higher = more genuine**; it does
+not use automatic contamination thresholds or treat scores as probabilities.
 
 The downloader verifies SHA-256
 `4fd279eab07ba65be0d3b4f79943d176abe1a36b16927f568b199d7ae5638739`
