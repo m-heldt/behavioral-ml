@@ -12,6 +12,9 @@ import subprocess
 import numpy as np
 import pandas as pd
 import sklearn
+from pyod.models.hbos import HBOS
+from pyod.models.knn import KNN
+from pyod.models.lof import LOF
 from sklearn.ensemble import IsolationForest
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
@@ -35,40 +38,64 @@ def estimator_parameters(estimator):
     return json.loads(json.dumps(estimator.get_params(deep=True), default=str))
 
 
+def personal_detectors(n_enroll=5, random_state=42):
+    """Seven fixed baselines; neighbor counts respect enrollment self-exclusion."""
+    if not isinstance(n_enroll, (int, np.integer)) or isinstance(n_enroll, bool) or n_enroll < 2:
+        raise ValueError("The personal detector matrix needs at least two enrollment attempts")
+    return {
+        "template_l1": train.TemplateDetector(center="median", scale="std"),
+        "scaled_l1": train.TemplateDetector(center="mean", scale="mad"),
+        "ocsvm": _pipeline(OneClassSVM(kernel="rbf", gamma="scale")),
+        "iforest": _pipeline(IsolationForest(n_estimators=200, random_state=random_state)),
+        "knn": _pipeline(train.PyODNoveltyAdapter(KNN(
+            n_neighbors=min(3, n_enroll - 1), method="mean", metric="manhattan"))),
+        "lof": _pipeline(train.PyODNoveltyAdapter(LOF(
+            n_neighbors=min(2, n_enroll - 1), novelty=True))),
+        "hbos": _pipeline(train.PyODNoveltyAdapter(HBOS(n_bins=3))),
+    }
+
+
+def run_personal_matrix(feature_sets, n_enroll=5, random_state=42):
+    """Score every detector × feature set on identical P2 probe identities."""
+    if not feature_sets:
+        raise ValueError("At least one feature set is required")
+    reference = next(iter(feature_sets.values())).index.sort_values()
+    detectors = personal_detectors(n_enroll, random_state)
+    experiments = {}
+    for feature_name, features in feature_sets.items():
+        if not features.index.sort_values().equals(reference):
+            raise ValueError("Feature sets must contain identical attempt identities")
+        for detector_name, detector in detectors.items():
+            scores = train.enroll_and_score(detector, features, n_enroll)
+            scores.attrs.update(feature_set=feature_name, feature_columns=list(features),
+                                random_state=random_state, estimator=repr(detector),
+                                estimator_params=estimator_parameters(detector))
+            experiments[f"p2.{detector_name}.{feature_name}"] = scores
+    return experiments
+
+
 def run_baselines(feature_sets, typist_candidates, n_enroll=5, n_splits=5, random_state=42):
-    """Fixed baseline settings, without selecting hyperparameters on the results."""
+    """Fixed personal matrix plus keyboard-only P1/global reference methods."""
+    experiments = run_personal_matrix(feature_sets, n_enroll, random_state)
     keys = feature_sets["keys"]
     cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
-    experiments = {
-        "p1.logreg": train.cross_val_predict_per_user(
-            _pipeline(LogisticRegression(C=1, max_iter=1000)), keys, cv)
-    }
-    detectors = {
-        "p2.template_l1": train.TemplateDetector(center="median", scale="std"),
-        "p2.scaled_l1": train.TemplateDetector(center="mean", scale="mad"),
-        "p2.ocsvm": _pipeline(OneClassSVM(kernel="rbf", gamma="scale")),
-        "p2.iforest": _pipeline(IsolationForest(n_estimators=200, random_state=random_state)),
-    }
-    for name, detector in detectors.items():
-        experiments[name] = train.enroll_and_score(detector, keys, n_enroll)
-        experiments[name].attrs["estimator"] = repr(detector)
-        experiments[name].attrs["estimator_params"] = estimator_parameters(detector)
+    logreg = _pipeline(LogisticRegression(C=1, max_iter=1000))
+    references = {"p1.logreg": train.cross_val_predict_per_user(logreg, keys, cv)}
+    references["p1.logreg"].attrs.update(estimator=repr(logreg),
+                                        estimator_params=estimator_parameters(logreg))
     global_models = {
         "p2.global_svc": _pipeline(SVC(kernel="rbf", gamma="scale")),
         "p2.global_logreg": _pipeline(LogisticRegression(C=1, max_iter=1000)),
     }
     for name, model in global_models.items():
         group_cv = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
-        experiments[name] = train.cross_val_predict_global(
+        references[name] = train.cross_val_predict_global(
             model, keys, group_cv, n_enroll=n_enroll, typist_candidates=typist_candidates)
-        experiments[name].attrs["estimator"] = repr(model)
-        experiments[name].attrs["estimator_params"] = estimator_parameters(model)
-    for scores in experiments.values():
+        references[name].attrs.update(estimator=repr(model), estimator_params=estimator_parameters(model))
+    for scores in references.values():
         scores.attrs.update(feature_set="keys", feature_columns=list(keys),
                             n_splits=n_splits, random_state=random_state)
-    experiments["p1.logreg"].attrs["estimator"] = repr(_pipeline(LogisticRegression(C=1, max_iter=1000)))
-    experiments["p1.logreg"].attrs["estimator_params"] = estimator_parameters(
-        _pipeline(LogisticRegression(C=1, max_iter=1000)))
+    experiments.update(references)
     return experiments
 
 
@@ -95,7 +122,7 @@ def write_results(experiments, output_dir, data_dir=None):
     common = common_probe_scores(experiments)
     results_table(experiments).to_csv(output_dir / "all_probes_metrics.csv")
     results_table(common).to_csv(output_dir / "common_probes_metrics.csv")
-    predictions, per_user = [], []
+    predictions, per_user, per_user_all = [], [], []
     configuration = {}
     for name, scores in experiments.items():
         frame = scores.to_frame()
@@ -104,9 +131,11 @@ def write_results(experiments, output_dir, data_dir=None):
         frame["experiment"] = name
         predictions.append(frame.reset_index())
         per_user.append(evaluation.per_user_metrics(common[name]).assign(experiment=name).reset_index())
+        per_user_all.append(evaluation.per_user_metrics(scores).assign(experiment=name).reset_index())
         configuration[name] = {k: v for k, v in scores.attrs.items() if k != "folds"}
     pd.concat(predictions, ignore_index=True).to_csv(output_dir / "predictions.csv", index=False)
     pd.concat(per_user, ignore_index=True).to_csv(output_dir / "per_user_common_probes.csv", index=False)
+    pd.concat(per_user_all, ignore_index=True).to_csv(output_dir / "per_user_all_probes.csv", index=False)
     root = Path(__file__).resolve().parents[2]
     revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True)
     digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()

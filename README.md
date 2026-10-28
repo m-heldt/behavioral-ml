@@ -53,10 +53,22 @@ a newly enrolled customer would not supply same-card impostor examples.
 data. Global verifiers learn from other users' absolute template-to-probe
 differences, with shared preprocessing fitted inside each training fold.
 
-The default model comparison uses the same 18 keyboard features. The median/std
-Manhattan template and mean/MAD scaled-Manhattan template are distinct methods.
-Isolation Forest has a fixed seed and uses the same preprocessing/feature set
-as the other default sklearn detectors.
+The personal matrix runs **seven methods × three feature sets = 21
+configurations**, all using the same 1,320 P2 probes. It compares the two
+Manhattan templates, One-Class SVM, Isolation Forest, PyOD kNN, LOF, and HBOS
+across keyboard, mouse, and combined features. Three keyboard-only P1/global
+references bring the complete run to 24 configurations. The median/std and
+mean/MAD Manhattan templates remain distinct methods. Isolation Forest has a
+fixed seed; sklearn/PyOD pipelines fit median imputation and standard scaling
+on enrollment only.
+
+Fixed PyOD settings are kNN with three neighbors and mean Manhattan distance,
+LOF with two neighbors and `novelty=True`, and HBOS with three bins. Neighbor
+counts shrink for smaller enrollment sizes; the matrix needs at least two
+enrollment attempts. PyOD anomaly scores are negated. With only five enrollment
+rows, density and histogram estimates remain exploratory. ECOD/COPOD are
+excluded because their stock scoring recomputes empirical distributions using
+the probe batch, making one probe's score depend on other probes.
 
 ### Inferred impostor identities
 
@@ -75,7 +87,7 @@ assumption; recorded participant IDs would be needed to verify it directly.
 
 ## Current fixed-baseline results
 
-These results use the **same 552 P2 probe rows for every method**: 440 genuine
+The keyboard reference results below use the **same 552 P2 probe rows for every method**: 440 genuine
 and 112 impostor attempts. This is the common subset retained by conservative
 global identity filtering; 768 of the original 880 impostor probes are excluded.
 P1 is restricted to these rows for reporting but retains its different training
@@ -122,8 +134,8 @@ evaluation. No matched improvement over that result is claimed.
 - **Exploratory evaluation:** no independent threshold calibration, hyperparameter
   selection study, or confidence-interval claim is made.
 
-Useful extensions include keyboard/mouse ablations, recorded-person-disjoint
-cross-session data and calibration. They are separate from
+Useful extensions include recorded-person-disjoint cross-session data and
+calibration. They are separate from
 the correctness fixes implemented here.
 
 ## Reproduce
@@ -172,6 +184,7 @@ The ignored `artifacts/` directory contains:
 - `all_probes_metrics.csv` and `common_probes_metrics.csv`: explicitly separate
   coverage and comparisons.
 - `per_user_common_probes.csv`: one row per experiment/user, including counts.
+- `per_user_all_probes.csv`: per-user results before common-probe restriction.
 - `configuration.json`: settings, versions, revision, source hashes, raw-file
   checksums, attribution assumption, and threshold policy.
 

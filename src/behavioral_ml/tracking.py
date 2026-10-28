@@ -95,7 +95,7 @@ def log_experiments(experiments, output_dir, tracking_uri=None,
     with run(client, experiment_id, run_name, tags={"phase": "baseline"}) as parent_id:
         # Only upload the export files, never tracking databases or raw inputs.
         for name in ["configuration.json", "predictions.csv", "all_probes_metrics.csv",
-                     "common_probes_metrics.csv", "per_user_common_probes.csv"]:
+                     "common_probes_metrics.csv", "per_user_common_probes.csv", "per_user_all_probes.csv"]:
             client.log_artifact(parent_id, str(output_dir / name))
         provenance = json.loads((output_dir / "configuration.json").read_text())
         client.set_tag(parent_id, "git_revision", provenance["git_revision"])

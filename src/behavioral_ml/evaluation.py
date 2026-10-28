@@ -105,6 +105,8 @@ def summarize(scores, far=0.01):
         "n_impostor": int((labels == 0).sum()),
         "n_users_with_both_classes": int(per_user["eer"].notna().sum()),
         "pooled_auc": report["auc"], "pooled_eer": report["eer"],
+        "per_user_auc_mean": per_user["auc"].mean(),
+        "per_user_auc_median": per_user["auc"].median(),
         f"pooled_frr_at_far_{far:g}": frr_at_far(labels, scores, far),
         "per_user_eer_mean": per_user["eer"].mean(),
         "per_user_eer_median": per_user["eer"].median(),
