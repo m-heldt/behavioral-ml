@@ -95,11 +95,14 @@ def cross_val_predict_per_user(model, features, cv):
     return _finish_scores(scores, folds, protocol="p1")
 
 
-def enroll_and_score(detector, features, n_enroll=5):
+def enroll_and_score(detector, features, n_enroll=5, *, fitted_models=None):
+    """Return P2 scores; optionally collect enrollment-fitted models by user."""
     enrollments, probes = split_enroll_probe(features, n_enroll)
     scores = pd.Series(index=probes.index, dtype=float)
     for user, frame in split_by_user(probes).items():
         fitted = clone(detector).fit(enrollments.loc[[user]])
+        if fitted_models is not None:
+            fitted_models[user] = fitted
         scores.loc[frame.index] = _score(fitted, frame)
     return _finish_scores(scores, protocol="p2", n_enroll=n_enroll)
 

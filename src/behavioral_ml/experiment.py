@@ -142,7 +142,7 @@ def write_results(experiments, output_dir, data_dir=None):
     provenance = {
         "python": platform.python_version(), "numpy": np.__version__,
         "pandas": pd.__version__, "sklearn": sklearn.__version__,
-        "pyod": version("pyod"), "mlflow": version("mlflow"),
+        "pyod": version("pyod"), "mlflow": version("mlflow"), "optuna": version("optuna"),
         "git_revision": revision.stdout.strip(),
         "source_sha256": {str(path.relative_to(root)): digest(path)
                           for path in sorted((root / "src").rglob("*.py"))},
@@ -162,11 +162,32 @@ def main(argv=None):
     parser.add_argument("--n-enroll", type=int, default=5)
     parser.add_argument("--tracking-uri", help="MLflow URI; default: output-dir/mlflow.db (SQLite)")
     parser.add_argument("--mlflow-experiment", default="kmt")
+    parser.add_argument("--tune", action="store_true", help="Run development-only kNN/OCSVM tuning")
+    parser.add_argument("--n-trials", type=int, default=30, help="Total trial budget per tuning study")
+    parser.add_argument("--evaluation-fraction", type=float, default=.3)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--feature-sets", nargs="+", choices=["keys", "mouse", "keys_mouse"],
+                        default=["keys", "mouse", "keys_mouse"])
+    parser.add_argument("--detectors", nargs="+", choices=["knn", "ocsvm"], default=["knn", "ocsvm"],
+                        help="Methods to tune; fixed baseline runs always use seven personal methods")
     args = parser.parse_args(argv)
     mouse_events, key_events = load_data(args.data_dir)
     feature_sets = build_feature_sets(mouse_events, key_events)
+    feature_sets = {name: feature_sets[name] for name in args.feature_sets}
     candidates = infer_typist_candidates(key_events)
-    experiments = run_baselines(feature_sets, candidates, n_enroll=args.n_enroll)
+    if args.tune:
+        from .tuning import run_tuning
+        experiments, selection = run_tuning(
+            feature_sets, candidates, args.output_dir, n_enroll=args.n_enroll, n_trials=args.n_trials,
+            evaluation_fraction=args.evaluation_fraction, random_state=args.seed,
+            detector_names=tuple(args.detectors), tracking_uri=args.tracking_uri,
+            experiment_name=args.mlflow_experiment, data_dir=args.data_dir)
+        print(f"Selected on development: {selection['selected_experiment']}")
+        print(results_table(experiments).to_string(float_format=lambda x: f"{x:.4f}"))
+        return 0
+    if "keys" not in feature_sets:
+        parser.error("Baseline reference models require the keys feature set")
+    experiments = run_baselines(feature_sets, candidates, n_enroll=args.n_enroll, random_state=args.seed)
     write_results(experiments, args.output_dir, args.data_dir)
     from .tracking import log_experiments
     run_id = log_experiments(experiments, args.output_dir, args.tracking_uri, args.mlflow_experiment)

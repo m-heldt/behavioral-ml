@@ -11,6 +11,7 @@ dependencies = [
     "matplotlib>=3.11.2",
     "mlflow>=3.16.1",
     "numpy>=2.5.3",
+    "optuna>=5.0.0",
     "pandas>=3.0.6",
     "pooch>=1.9.0",
     "pyod>=3.6.6",

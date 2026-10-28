@@ -85,22 +85,25 @@ def log_score_run(client, run_id, scores, common_scores=None, params=None):
 
 
 def log_experiments(experiments, output_dir, tracking_uri=None,
-                    experiment_name="kmt", run_name="baseline-matrix"):
+                    experiment_name="kmt", run_name="baseline-matrix", phase="baseline",
+                    extra_artifacts=()):
     """Log previously exported results, returning the parent MLflow run ID."""
     from .experiment import common_probe_scores
 
     output_dir = Path(output_dir).resolve()
     common = common_probe_scores(experiments)
     client, experiment_id = create_client(output_dir, tracking_uri, experiment_name)
-    with run(client, experiment_id, run_name, tags={"phase": "baseline"}) as parent_id:
+    with run(client, experiment_id, run_name, tags={"phase": phase}) as parent_id:
         # Only upload the export files, never tracking databases or raw inputs.
         for name in ["configuration.json", "predictions.csv", "all_probes_metrics.csv",
                      "common_probes_metrics.csv", "per_user_common_probes.csv", "per_user_all_probes.csv"]:
             client.log_artifact(parent_id, str(output_dir / name))
+        for path in extra_artifacts:
+            client.log_artifact(parent_id, str(path))
         provenance = json.loads((output_dir / "configuration.json").read_text())
         client.set_tag(parent_id, "git_revision", provenance["git_revision"])
         for name, scores in experiments.items():
-            tags = {"phase": "baseline", "experiment": name,
+            tags = {"phase": phase, "experiment": name,
                     "score_direction": "higher_is_genuine"}
             with run(client, experiment_id, name, parent_id, tags) as child_id:
                 log_score_run(client, child_id, scores, common[name])

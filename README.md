@@ -131,8 +131,9 @@ evaluation. No matched improvement over that result is claimed.
   and its timestamp assumptions cannot be verified from recorded attacker IDs.
 - **Small, controlled dataset:** fictitious details, one GUI, balanced labels,
   and few probes do not reproduce real fraud prevalence or practised attacks.
-- **Exploratory evaluation:** no independent threshold calibration, hyperparameter
-  selection study, or confidence-interval claim is made.
+- **Exploratory evaluation:** threshold calibration and confidence intervals
+  remain separate work. Optuna's development/evaluation split is a new selection
+  protocol on an already explored dataset, not independent cross-session data.
 
 Useful extensions include recorded-person-disjoint cross-session data and
 calibration. They are separate from
@@ -166,6 +167,51 @@ explicit so all personal models belong to their configuration's run. A PyOD
 adapter reverses anomaly scores to preserve **higher = more genuine**; it does
 not use automatic contamination thresholds or treat scores as probabilities.
 
+### Optuna tuning
+
+[tuning.ipynb](notebooks/tuning.ipynb) is a self-contained development/evaluation
+workflow. Its CLI equivalent, from the repository root, is:
+
+```bash
+uv run --locked behavioral-ml --tune --output-dir artifacts/tuning --n-trials 30
+uv run --locked mlflow ui --backend-store-uri sqlite:///artifacts/tuning/mlflow.db
+```
+
+The default seed 42 assigns 61 people to development and 27 to evaluation.
+Unknown/cross-partition typists are filtered using **all** plausible candidates.
+This retains 672 development probes (305 genuine, 367 impostor) and 175
+evaluation probes (135 genuine, 40 impostor). All six predeclared
+detector/feature combinations use those same rows; 25 evaluation users have
+both classes. Separation is conditional on timestamp attribution, as above.
+
+One shared configuration per detector/feature set is selected using **mean
+per-user development ROC AUC**. kNN uses an exhaustive Optuna grid over 1–4
+neighbors, largest/mean/median distance, and Manhattan/Euclidean distance
+(24 trials). OCSVM uses seeded TPE for `nu` in [0.05, 0.5] and log-scaled
+`gamma` in [0.001, 1], with 30 trials by default. Both use fixed enrollment-only
+imputation/scaling. Runs are sequential with no pruning. Labeled development
+impostors inform parameter selection; personal enrollment is genuine-only.
+
+`selection.json` freezes all six choices and the overall development-selected
+winner **before evaluation scoring**. Evaluation is reported for every
+predeclared configuration; it does not choose a new winner. Raw-score pooled
+metrics, per-user metrics, and coverage remain separate. No deployment
+threshold is calibrated by this workflow; with only 40 retained evaluation
+impostors, one false acceptance already changes observed FAR by 2.5 points.
+
+Tuning saves `split.json`, `split_audit.csv`, `study_contract.json`, `optuna.db`,
+trial tables, and `selection.json`. Evaluation reports are in `evaluation/`;
+`models/` holds a joblib dictionary of evaluation-user enrollment pipelines
+for each configuration. MLflow uses separate tuning/development/evaluation
+phases and logs the contracts and model bundles alongside scores and plots.
+
+Completed trials survive interruptions. An evaluated output directory reruns
+only its frozen configurations; changing the budget, code, data, or protocol
+requires another directory. Fresh sequential studies are seeded; resuming an
+unfinished TPE study can change later proposals because sampler RNG state
+restarts. `--feature-sets keys` and `--detectors knn` restrict a predeclared run;
+`--seed`, `--evaluation-fraction`, and `--n-enroll` configure its protocol.
+
 The downloader verifies SHA-256
 `4fd279eab07ba65be0d3b4f79943d176abe1a36b16927f568b199d7ae5638739`
 for the archive, keeps the raw JSON files in `data/raw_kmt_dataset/`, and leaves
@@ -197,6 +243,8 @@ The initial code and analysis were written by me with review from ChatGPT and
 Claude. Claude also helped with notebook prose and the original README.
 Subsequent corrections and consolidation were developed with Codex, including
 regression tests, indexed scoring, protocol checks, and updated documentation.
+The PyOD matrix, explicit MLflow tracking, and development-only Optuna workflow
+were also implemented and verified with Codex.
 
 ## References
 
